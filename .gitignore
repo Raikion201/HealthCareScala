@@ -32,6 +32,11 @@
 # Log files
 *.log
 
+# Environment variables
+.env
+*.env
+!.env.example
+
 # Other
 .cache
 .cache-main
