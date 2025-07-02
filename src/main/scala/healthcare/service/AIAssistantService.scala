@@ -9,15 +9,15 @@ import io.circe.parser._
 import sttp.client4._
 import sttp.client4.circe._
 
+// Data models for DeepSeek API
 case class DeepSeekMessage(role: String, content: String)
 case class DeepSeekRequest(model: String, messages: List[DeepSeekMessage], temperature: Double = 0.7)
 case class DeepSeekChoice(message: DeepSeekMessage)
 case class DeepSeekResponse(choices: List[DeepSeekChoice])
-
-// Error response structure
 case class DeepSeekError(message: String, `type`: String, code: String)
 case class DeepSeekErrorResponse(error: DeepSeekError)
 
+// Circe codecs
 given Codec[DeepSeekMessage] = Codec.from(
   Decoder.forProduct2("role", "content")(DeepSeekMessage.apply),
   Encoder.forProduct2("role", "content")(m => (m.role, m.content))
@@ -48,15 +48,71 @@ given Codec[DeepSeekErrorResponse] = Codec.from(
   Encoder.forProduct1("error")(_.error)
 )
 
-trait AIAssistantService {
-  def analyzeHealthAndProvideDiet(healthData: HealthData): Task[String]
-}
-
-class AIAssistantServiceImpl(config: AppConfig) extends AIAssistantService {
+object AIAssistantService {
   
-  def analyzeHealthAndProvideDiet(healthData: HealthData): Task[String] = {
-    val prompt = createHealthAnalysisPrompt(healthData)
+  private def createHealthAnalysisPrompt(healthData: HealthData): String = {
+    val bmi = healthData.bmi
+    val bmiStatus = bmi match {
+      case bmi if bmi < 18.5 => "Underweight"
+      case bmi if bmi < 25.0 => "Normal weight"
+      case bmi if bmi < 30.0 => "Overweight"
+      case _ => "Obese"
+    }
     
+    s"""
+Please analyze the following health data and provide a comprehensive assessment in PLAIN TEXT format without any emojis or special characters:
+
+Personal Information:
+- Gender: ${healthData.gender}
+- Age: ${healthData.age} years
+- Height: ${healthData.heightCm} cm
+- Weight: ${healthData.weightKg} kg
+- BMI: ${Math.round(bmi * 100.0) / 100.0} ($bmiStatus)
+
+Please provide your response in the following EXACT format using simple text and line breaks:
+
+HEALTH STATUS ASSESSMENT
+Based on your BMI of ${Math.round(bmi * 100.0) / 100.0}, you are classified as $bmiStatus.
+[Provide detailed health assessment here]
+
+DAILY DIET RECOMMENDATIONS
+
+BREAKFAST
+- [List breakfast items]
+
+LUNCH  
+- [List lunch items]
+
+DINNER
+- [List dinner items]
+
+SNACKS
+- [List healthy snack options]
+
+CALORIE BREAKDOWN
+Total Daily Calories: [amount] kcal
+- Breakfast: [amount] kcal
+- Lunch: [amount] kcal  
+- Dinner: [amount] kcal
+- Snacks: [amount] kcal
+
+HEALTH TIPS
+- [Tip 1]
+- [Tip 2]
+- [Tip 3]
+
+IMPORTANT: Do NOT use any emojis, special symbols, markdown formatting, or tables. Use only plain text with simple line breaks and dashes for lists. Keep the response clear and well-structured but simple.
+"""
+  }
+  
+  def analyzeHealthAndProvideDiet(healthData: HealthData): ZIO[AppConfig, Throwable, String] =
+    for {
+      config <- ZIO.service[AppConfig]
+      prompt = createHealthAnalysisPrompt(healthData)
+      result <- callDeepSeekAPI(config, prompt)
+    } yield result
+  
+  private def callDeepSeekAPI(config: AppConfig, prompt: String): Task[String] =
     ZIO.attemptBlocking {
       val backend = DefaultSyncBackend()
       
@@ -125,71 +181,4 @@ class AIAssistantServiceImpl(config: AppConfig) extends AIAssistantService {
       ZIO.logError(s"AI Assistant Service Error: $errorMessage") *>
       ZIO.fail(new RuntimeException(errorMessage))
     }
-  }
-  
-  private def createHealthAnalysisPrompt(healthData: HealthData): String = {
-    val bmi = healthData.bmi
-    val bmiStatus = bmi match {
-      case bmi if bmi < 18.5 => "Underweight"
-      case bmi if bmi < 25.0 => "Normal weight"
-      case bmi if bmi < 30.0 => "Overweight"
-      case _ => "Obese"
-    }
-    
-    s"""
-Please analyze the following health data and provide a comprehensive assessment in PLAIN TEXT format without any emojis or special characters:
-
-Personal Information:
-- Gender: ${healthData.gender}
-- Age: ${healthData.age} years
-- Height: ${healthData.heightCm} cm
-- Weight: ${healthData.weightKg} kg
-- BMI: ${Math.round(bmi * 100.0) / 100.0} ($bmiStatus)
-
-Please provide your response in the following EXACT format using simple text and line breaks:
-
-HEALTH STATUS ASSESSMENT
-Based on your BMI of ${Math.round(bmi * 100.0) / 100.0}, you are classified as $bmiStatus.
-[Provide detailed health assessment here]
-
-DAILY DIET RECOMMENDATIONS
-
-BREAKFAST
-- [List breakfast items]
-
-LUNCH  
-- [List lunch items]
-
-DINNER
-- [List dinner items]
-
-SNACKS
-- [List healthy snack options]
-
-CALORIE BREAKDOWN
-Total Daily Calories: [amount] kcal
-- Breakfast: [amount] kcal
-- Lunch: [amount] kcal  
-- Dinner: [amount] kcal
-- Snacks: [amount] kcal
-
-HEALTH TIPS
-- [Tip 1]
-- [Tip 2]
-- [Tip 3]
-
-IMPORTANT: Do NOT use any emojis, special symbols, markdown formatting, or tables. Use only plain text with simple line breaks and dashes for lists. Keep the response clear and well-structured but simple.
-"""
-  }
-}
-
-object AIAssistantService {
-  def analyzeHealthAndProvideDiet(healthData: HealthData): ZIO[AIAssistantService, Throwable, String] =
-    ZIO.serviceWithZIO[AIAssistantService](_.analyzeHealthAndProvideDiet(healthData))
-  
-  val live: ZLayer[AppConfig, Throwable, AIAssistantService] = ZLayer.fromZIO {
-    for {
-      config <- ZIO.service[AppConfig]
-    } yield new AIAssistantServiceImpl(config)
-  }
 }

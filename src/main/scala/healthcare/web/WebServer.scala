@@ -2,6 +2,7 @@ package healthcare.web
 
 import healthcare.model._
 import healthcare.service._
+import healthcare.config.AppConfig
 import zio._
 import zio.http._
 import zio.stream._
@@ -299,7 +300,7 @@ object WebServer {
     </html>
     """
 
-  val app: Http[HealthService with AIAssistantService, Response, Request, Response] = Http.collectZIO[Request] {
+  val app: Http[AppConfig, Response, Request, Response] = Http.collectZIO[Request] {
     // Serve the form on GET /
     case Method.GET -> Root => 
       ZIO.succeed(Response.html(healthForm))
@@ -359,7 +360,7 @@ object WebServer {
         // Log the health data for debugging
         _ <- ZIO.logInfo(s"Processing AI request for: gender=${healthData.gender}, age=${healthData.age}, BMI=${healthData.bmi}")
         
-        // Get AI recommendations and stream response
+        // Get AI recommendations with config access
         aiResponse <- AIAssistantService.analyzeHealthAndProvideDiet(healthData)
           .tapError(e => ZIO.logError(s"AI service error: ${e.getMessage}"))
         

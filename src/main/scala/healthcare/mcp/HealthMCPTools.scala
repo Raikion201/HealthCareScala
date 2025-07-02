@@ -2,13 +2,12 @@ package healthcare.mcp
 
 import healthcare.model._
 import healthcare.service._
+import healthcare.config.AppConfig
 import chimp._
 import io.circe.Codec
 import sttp.tapir.Schema
 import zio._
-import zio.Runtime
 
-// Input types for MCP tools
 case class HealthAnalysisInput(
   gender: String,
   heightCm: Double,
@@ -23,9 +22,8 @@ case class BMICalculationInput(
 
 object HealthMCPTools {
   
-  def createTools(runtime: Runtime[HealthService with AIAssistantService]) = {
+  def createTools = {
     
-    // Health analysis with AI diet recommendation tool
     val healthAnalysisTool = tool("health_analysis")
       .description("Analyzes health data and provides AI-powered diet recommendations with calorie breakdown")
       .input[HealthAnalysisInput]
@@ -39,14 +37,22 @@ object HealthMCPTools {
           
           val healthData = HealthData(gender, input.heightCm, input.weightKg, input.age)
           
-          // Run ZIO effect using the runtime
-          val result = Unsafe.unsafe { implicit unsafe =>
-            runtime.unsafe.run(
-              AIAssistantService.analyzeHealthAndProvideDiet(healthData)
-            ).getOrThrowFiberFailure()
+          val bmi = healthData.bmi
+          val status = bmi match {
+            case bmi if bmi < 18.5 => "Underweight"
+            case bmi if bmi < 25.0 => "Normal weight"
+            case bmi if bmi < 30.0 => "Overweight"
+            case _ => "Obese"
           }
           
-          Right(result)
+          val basicRecommendation = status match {
+            case "Underweight" => "Consider consulting with a nutritionist to gain healthy weight through proper diet."
+            case "Normal weight" => "Maintain your current healthy habits with balanced nutrition and regular exercise."
+            case "Overweight" => "Consider adopting a calorie-controlled diet and increasing physical activity."
+            case "Obese" => "Please consult with healthcare professionals for a personalized weight management plan."
+          }
+          
+          Right(s"Health Analysis Results:\nBMI: ${Math.round(bmi * 100.0) / 100.0} ($status)\nRecommendation: $basicRecommendation")
         } catch {
           case e: Exception => Left(s"Error analyzing health data: ${e.getMessage}")
         }
